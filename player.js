@@ -229,9 +229,10 @@
   function placeMarkers() {
     const endOfLane = [-Infinity, -Infinity, -Infinity, -Infinity, -Infinity];
     const width = markers.clientWidth;
+    const gap = matchMedia('(max-width: 850px)').matches ? 8 : 12;
     for (const [i, entry] of data.media.entries()) {
       const x = width * entry.at / duration;
-      let lane = endOfLane.findIndex((end) => x - end >= 12);
+      let lane = endOfLane.findIndex((end) => x - end >= gap);
       if (lane < 0) lane = endOfLane.indexOf(Math.min(...endOfLane));
       markerButtons[i].style.setProperty('--lane', lane);
       endOfLane[lane] = x;
@@ -286,7 +287,7 @@
     get('stage-type').textContent = isQa ? '现场交流' : liveClip ? '演示视频' : entry.kind === 'video' ? '视频末帧' : '现场课件';
     get('caption-time').textContent = formatTime(entry.at);
     get('caption-chapter').textContent = entry.chapter;
-    get('caption-title').textContent = entry.title;
+    get('caption-title').textContent = isQa ? '现场交流' : entry.title;
     get('caption-note').textContent = entry.note || '';
     if (liveClip) {
       releaseVideo();
@@ -331,6 +332,9 @@
       setCurrent(cueButtons, activeCue, next);
       activeCue = next;
       if (follow) reveal(transcriptScroll, cueButtons[activeCue]);
+      if (data.media[activeMedia].kind === 'qa') {
+        get('caption-title').textContent = data.cues[activeCue]?.role || '现场交流';
+      }
     }
   }
 

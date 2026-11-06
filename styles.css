@@ -806,7 +806,7 @@ svg { display: block; }
   .chapter-heading:first-child { margin-top: 0; }
   .slide-card { flex: 0 0 112px; display: flex; flex-direction: column; align-items: stretch; }
   .slide-title { -webkit-line-clamp: 1; }
-  .transcript-body { flex: 0 0 auto; max-height: 41dvh; padding-inline: 10px; }
+  .transcript-body { flex: 0 0 auto; max-height: 47dvh; padding-inline: 10px; overscroll-behavior: auto; }
   .transport { position: sticky; bottom: 0; padding: 7px 10px calc(8px + env(safe-area-inset-bottom)); min-height: 109px; }
   .play-toggle { width: 38px; height: 38px; }
   .transport h2, .volume-label { display: none; }
@@ -815,9 +815,16 @@ svg { display: block; }
   .playback-status { position: absolute; right: 10px; bottom: 12px; font-size: 10px; }
   .playback-status:not(:empty) { background: #26352d; padding: 0 3px; }
   .timeline { margin-top: 1px; }
-  .markers { height: 20px; }
-  .marker { top: calc(var(--lane, 0) * 4px); }
-  .scale { height: 12px; }
+  .markers { height: 23px; }
+  .marker {
+    top: calc(var(--lane, 0) * 4px);
+    width: 9px;
+    height: 7px;
+  }
+  .marker::after { width: 3px; height: 3px; }
+  .marker[data-kind="video"]::after { width: 4px; height: 4px; }
+  .marker[data-kind="qa"]::after { width: 2px; height: 7px; }
+  .scale { height: 13px; }
   .qa { padding: 12px; }
   .qa-kicker, .qa p { font-size: 11px; }
   .qa h3 { font-size: 29px; }

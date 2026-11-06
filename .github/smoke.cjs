@@ -168,9 +168,10 @@ async function mobile(browser, url) {
   assert(await page.locator('#stage').isVisible());
   assert(!(await page.locator('#left-resize').isVisible()));
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
-  await page.screenshot({ path: path.join(screenshotDir, 'mobile.png'), fullPage: true });
+  await page.screenshot({ path: path.join(screenshotDir, 'mobile.png') });
   await page.locator('#qa-jump').click();
   assert(await page.locator('#qa-view').isVisible());
+  await page.screenshot({ path: path.join(screenshotDir, 'mobile-qa.png') });
   await page.close();
 }
 
