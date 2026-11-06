@@ -783,6 +783,7 @@ svg { display: block; }
   .stage { order: -1; }
   .stage-body { padding: 11px 13px 0; }
   .visual { flex: 0 0 auto; aspect-ratio: 16/9; }
+  .visual:has(.qa:not([hidden])) { aspect-ratio: auto; }
   .stage-footer { min-height: 65px; margin-top: 8px; }
   .avatar { width: 70px; }
   .stage-heading-tools { gap: 5px; }

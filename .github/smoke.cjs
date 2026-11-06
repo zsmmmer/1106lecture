@@ -171,6 +171,7 @@ async function mobile(browser, url) {
   await page.screenshot({ path: path.join(screenshotDir, 'mobile.png') });
   await page.locator('#qa-jump').click();
   assert(await page.locator('#qa-view').isVisible());
+  assert(await page.locator('#qa-view').evaluate((el) => el.scrollHeight <= el.clientHeight + 1));
   await page.screenshot({ path: path.join(screenshotDir, 'mobile-qa.png') });
   await page.close();
 }
