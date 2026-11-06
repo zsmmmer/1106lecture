@@ -1,0 +1,56 @@
+name: Verify and publish lecture
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: lecture-pages
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/browser" --no-audit --no-fund playwright-core@1.65.0
+          node "$RUNNER_TEMP/browser/node_modules/playwright-core/cli.js" install --with-deps chromium --only-shell
+          sudo apt-get install -y fonts-noto-cjk
+      - name: Check the player in desktop and mobile viewports
+        run: |
+          NODE_PATH="$RUNNER_TEMP/browser/node_modules" QA_DIR="$RUNNER_TEMP/lecture-qa" node .github/smoke.cjs
+      - name: Save layout previews
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: lecture-previews
+          path: ${{ runner.temp }}/lecture-qa
+          if-no-files-found: ignore
+          retention-days: 2
+      - name: Package the site
+        run: |
+          mkdir "$RUNNER_TEMP/pages"
+          cp -R index.html styles.css player.js lecture-data.js .nojekyll assets "$RUNNER_TEMP/pages/"
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: ${{ runner.temp }}/pages
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v5
+        id: deployment
