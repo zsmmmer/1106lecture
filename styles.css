@@ -876,7 +876,7 @@ svg { display: block; }
     border-radius: 4px;
     min-height: 40px;
     padding: 6px 8px;
-    font-size: 13px;
+    font-size: 16px;
   }
 
   .mobile-bar {
@@ -930,7 +930,7 @@ svg { display: block; }
   .transport-top, .transport-left, .transport-right { gap: 4px; }
   .play-toggle { width: 44px; height: 44px; }
   .transport .icon-button { width: 40px; height: 44px; }
-  .rate-label select { min-height: 40px; min-width: 52px; }
+  .rate-label select { min-height: 40px; min-width: 56px; font-size: 16px; }
   .timer { min-width: 6ch; gap: 4px; }
   .playback-status { position: absolute; right: 10px; bottom: calc(6px + env(safe-area-inset-bottom)); font-size: 10px; }
   .playback-status:not(:empty) { background: #26352d; padding: 0 3px; }
@@ -967,6 +967,19 @@ svg { display: block; }
   .qa p { display: none; }
 }
 
+@media (max-width: 400px) and (max-height: 620px) {
+  .title-text p {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .mast-meta { flex-direction: row; gap: 6px; align-items: baseline; }
+  .visual { max-height: 22dvh; }
+}
+
 @media (min-width: 600px) and (max-width: 850px) {
   .slide-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
@@ -981,7 +994,7 @@ svg { display: block; }
   .title-text h1 { font-size: 23px; }
   .mast-meta { flex-direction: row; align-self: center; gap: 7px; }
   .mast-meta time { display: none; }
-  .workspace { min-height: 285px; }
+  .workspace { min-height: 250px; }
   .upper {
     display: grid;
     grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);

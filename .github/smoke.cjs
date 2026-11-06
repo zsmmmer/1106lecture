@@ -185,10 +185,10 @@ async function mobile(browser, url, width, height, name) {
   assert(!(await page.locator('#slides-panel').isVisible()));
   const panel = await page.locator('#transcript-panel').boundingBox();
   const transport = await page.locator('#transport').boundingBox();
-  assert(panel.height >= 72);
-  assert(panel.y + panel.height <= transport.y + 1);
-  assert(transport.y + transport.height <= height + 2);
   await page.screenshot({ path: path.join(screenshotDir, `${name}.png`) });
+  assert(panel.height >= 72, `${name}: only ${panel.height}px for the transcript`);
+  assert(panel.y + panel.height <= transport.y + 1);
+  assert(transport.y + transport.height <= height + 2, `${name}: playback controls extend past the viewport`);
 
   await page.getByRole('tab', { name: '画面索引' }).tap();
   assert(await page.locator('#slides-panel').isVisible());
