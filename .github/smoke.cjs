@@ -76,6 +76,12 @@ async function desktop(browser, url) {
   assert.equal(await page.locator('.slide-card').count(), 77);
   assert.equal(await page.locator('.marker').count(), 77);
   assert((await page.locator('.cue').count()) >= 120);
+  assert(!(await page.locator('#mobile-bar').isVisible()));
+  assert.match(await page.locator('#subtitle-line').textContent(), /联合主办/);
+  await page.getByRole('button', { name: '字幕', exact: true }).click();
+  assert(!(await page.locator('#subtitle-band').isVisible()));
+  await page.getByRole('button', { name: '字幕', exact: true }).click();
+  assert(await page.locator('#subtitle-band').isVisible());
   await page.screenshot({ path: path.join(screenshotDir, 'desktop.png') });
 
   const title = page.locator('#caption-title');
@@ -83,6 +89,11 @@ async function desktop(browser, url) {
   assert.equal(await title.textContent(), '文化遗产数字化与古塔研究');
   await page.waitForFunction(() => Math.abs(document.querySelector('audio').currentTime - 160) < 0.12);
   assert.equal(await page.locator('.cue[aria-current=true] .cue-time').textContent(), '02:26');
+  await page.waitForFunction(() => {
+    const { currentTime } = document.querySelector('audio');
+    const line = window.LECTURE_DATA.subtitles.find((cue) => cue.at <= currentTime && currentTime < cue.end);
+    return document.querySelector('#subtitle-line').textContent === (line?.text || '');
+  });
 
   await page.locator('.marker[aria-current=true]').hover();
   assert(await page.locator('#marker-preview').isVisible());
@@ -118,6 +129,8 @@ async function desktop(browser, url) {
   await page.locator('#play-toggle').click();
   await page.waitForFunction(() => !document.querySelector('audio').paused &&
     !document.querySelector('video').paused && document.querySelector('.avatar.is-speaking'));
+  assert.equal(await page.locator('video').evaluate((el) => el.muted), true);
+  assert.equal(await page.locator('audio').evaluate((el) => el.muted), false);
   await page.locator('#rate').selectOption('1.5');
   assert.equal(await page.locator('video').evaluate((el) => el.playbackRate), 1.5);
   await page.locator('#play-toggle').click();
@@ -155,9 +168,9 @@ async function desktop(browser, url) {
   await page.close();
 }
 
-async function mobile(browser, url) {
+async function mobile(browser, url, width, height, name) {
   const page = await browser.newPage({
-    viewport: { width: 390, height: 844 },
+    viewport: { width, height },
     deviceScaleFactor: 1,
     isMobile: true,
     hasTouch: true,
@@ -168,11 +181,45 @@ async function mobile(browser, url) {
   assert(await page.locator('#stage').isVisible());
   assert(!(await page.locator('#left-resize').isVisible()));
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
-  await page.screenshot({ path: path.join(screenshotDir, 'mobile.png') });
-  await page.locator('#qa-jump').click();
+  assert(await page.getByRole('tab', { name: '同步讲稿', selected: true }).isVisible());
+  assert(!(await page.locator('#slides-panel').isVisible()));
+  const panel = await page.locator('#transcript-panel').boundingBox();
+  const transport = await page.locator('#transport').boundingBox();
+  assert(panel.height >= 72);
+  assert(panel.y + panel.height <= transport.y + 1);
+  assert(transport.y + transport.height <= height + 2);
+  await page.screenshot({ path: path.join(screenshotDir, `${name}.png`) });
+
+  await page.getByRole('tab', { name: '画面索引' }).tap();
+  assert(await page.locator('#slides-panel').isVisible());
+  assert(!(await page.locator('#transcript-panel').isVisible()));
+  await page.locator('.slide-card').filter({ hasText: '文化遗产数字化与古塔研究' }).tap();
+  await page.waitForFunction(() => Math.abs(document.querySelector('audio').currentTime - 160) < .12);
+  await page.getByRole('tab', { name: '同步讲稿' }).tap();
+  assert.equal(await page.locator('.cue[aria-current=true] .cue-time').textContent(), '02:26');
+
+  if (name === 'mobile') {
+    const cdp = await page.context().newCDPSession(page);
+    const scrubber = await page.locator('#seek').boundingBox();
+    const y = scrubber.y + scrubber.height / 2;
+    const x = scrubber.x + 10 + (scrubber.width - 20) * 160 / 5642.52;
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + 80, y }] });
+    await page.waitForFunction(() => !document.querySelector('#marker-preview').hidden);
+    assert.equal(await page.locator('audio').evaluate((el) => Math.round(el.currentTime)), 160);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForFunction(() => document.querySelector('audio').currentTime > 1000);
+    assert(!(await page.locator('#marker-preview').isVisible()));
+    await cdp.detach();
+  }
+
+  await page.locator('#qa-jump').tap();
   assert(await page.locator('#qa-view').isVisible());
-  assert(await page.locator('#qa-view').evaluate((el) => el.scrollHeight <= el.clientHeight + 1));
-  await page.screenshot({ path: path.join(screenshotDir, 'mobile-qa.png') });
+  assert(await page.locator('#qa-topic-select').isVisible());
+  assert.equal(await page.locator('#qa-topic-select option').count(), 7);
+  await page.locator('#qa-topic-select').selectOption('4757');
+  await page.waitForFunction(() => Math.abs(document.querySelector('audio').currentTime - 4757) < .12);
+  if (name === 'mobile') await page.screenshot({ path: path.join(screenshotDir, 'mobile-qa.png') });
   await page.close();
 }
 
@@ -183,8 +230,10 @@ async function mobile(browser, url) {
   const browser = await chromium.launch();
   try {
     await desktop(browser, url);
-    await mobile(browser, url);
-    console.log('Playback, video sync, navigation, panel resizing, downloads and mobile layout passed.');
+    await mobile(browser, url, 390, 844, 'mobile');
+    await mobile(browser, url, 320, 568, 'mobile-compact');
+    await mobile(browser, url, 932, 430, 'mobile-landscape');
+    console.log('Playback, muted video sync, subtitles, navigation, panel resizing, downloads and mobile layouts passed.');
   } finally {
     await browser.close();
     server.close();

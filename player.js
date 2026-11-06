@@ -6,7 +6,7 @@
   const audio = get('lecture-audio');
   const video = get('visual-video');
   const image = get('main-image');
-  const visual = get('visual');
+  const stage = get('stage');
   const status = get('playback-status');
   const stageMessage = get('stage-message');
   const play = get('play-toggle');
@@ -17,19 +17,28 @@
   const timeline = get('timeline');
   const preview = get('marker-preview');
   const followToggle = get('follow-toggle');
+  const transcriptHeading = followToggle.parentElement;
   const workspace = get('workspace');
   const downloads = get('download-dialog');
+  const subtitleToggle = get('subtitle-toggle');
+  const subtitleBand = get('subtitle-band');
+  const subtitleLine = get('subtitle-line');
+  const stageExpand = get('stage-expand');
+  const mobileBar = get('mobile-bar');
+  const mobile = matchMedia('(max-width: 850px), (max-width: 1024px) and (orientation: landscape) and (max-height: 540px) and (pointer: coarse)');
 
   get('download-open').addEventListener('click', () => downloads.showModal());
   if (!data) {
     stageMessage.textContent = '讲座索引未能载入，可在下载面板获取录音。';
     return;
   }
+  video.muted = true;
 
   let duration = data.duration;
   let pendingSeek = null;
   let activeMedia = -1;
   let activeCue = -1;
+  let activeSubtitle = -1;
   let visualKey = '';
   let currentClip = null;
   let follow = true;
@@ -37,6 +46,13 @@
   let videoPlayPending = false;
   let videoPlayDenied = false;
   let scrubbing = false;
+  let scrubPosition = null;
+  let mobilePanel = 'transcript';
+  const subtitles = data.subtitles ?? [];
+  const mobilePanes = [
+    { name: 'transcript', tab: get('tab-transcript'), panel: get('transcript-panel'), heading: 'transcript-label' },
+    { name: 'slides', tab: get('tab-slides'), panel: get('slides-panel'), heading: 'slides-label' }
+  ];
   const slideButtons = [];
   const cueButtons = [];
   const markerButtons = [];
@@ -67,16 +83,10 @@
     return left - 1;
   }
 
-  function reveal(container, row, horizontal = false) {
-    if (!row) return;
+  function reveal(container, row) {
+    if (!row || !container.clientHeight) return;
     const view = container.getBoundingClientRect();
     const item = row.getBoundingClientRect();
-    if (horizontal) {
-      if (item.left < view.left || item.right > view.right) {
-        container.scrollLeft += item.left - view.left - 10;
-      }
-      return;
-    }
     if (item.top < view.top + 4 || item.bottom > view.bottom - 6) {
       container.scrollTop += item.top - view.top - Math.min(view.height * .23, 80);
     }
@@ -104,17 +114,50 @@
     if (follow) reveal(transcriptScroll, cueButtons[activeCue]);
   }
 
-  function showPreview(entry) {
+  function showMobilePanel(name, focus = false) {
+    mobilePanel = name;
+    for (const pane of mobilePanes) {
+      const selected = pane.name === name;
+      pane.tab.setAttribute('aria-selected', String(selected));
+      pane.tab.tabIndex = selected ? 0 : -1;
+      pane.panel.hidden = !selected;
+      if (selected && focus) pane.tab.focus();
+    }
+    followToggle.hidden = name !== 'transcript';
+    if (name === 'slides') reveal(slideList, slideButtons[activeMedia]);
+    else if (follow) reveal(transcriptScroll, cueButtons[activeCue]);
+  }
+
+  function applyLayout() {
+    mobileBar.hidden = !mobile.matches;
+    for (const pane of mobilePanes) {
+      pane.panel.hidden = false;
+      if (mobile.matches) pane.panel.setAttribute('role', 'tabpanel');
+      else pane.panel.removeAttribute('role');
+      pane.panel.setAttribute('aria-labelledby', mobile.matches ? pane.tab.id : pane.heading);
+    }
+    if (mobile.matches) {
+      mobileBar.append(followToggle);
+      showMobilePanel(mobilePanel);
+    } else {
+      transcriptHeading.append(followToggle);
+      followToggle.hidden = false;
+    }
+    placeMarkers();
+  }
+
+  function showPreview(entry, time = entry.at) {
     const width = timeline.clientWidth;
-    const position = 7 + (width - 14) * (entry.at / duration);
-    const x = Math.min(width - 94, Math.max(94, position));
     const thumb = get('preview-image');
     thumb.hidden = !entry.thumb;
     if (entry.thumb) thumb.src = entry.thumb;
-    get('preview-time').textContent = formatTime(entry.at);
+    get('preview-time').textContent = formatTime(time);
     get('preview-title').textContent = entry.title;
-    preview.style.setProperty('--preview-x', `${x}px`);
     preview.hidden = false;
+    const half = preview.offsetWidth / 2;
+    const position = 7 + (width - 14) * (time / duration);
+    const x = Math.min(width - half, Math.max(half, position));
+    preview.style.setProperty('--preview-x', `${x}px`);
   }
 
   function buildSlides() {
@@ -164,7 +207,10 @@
       marker.addEventListener('pointerleave', () => { preview.hidden = true; });
       marker.addEventListener('focus', () => showPreview(entry));
       marker.addEventListener('blur', () => { preview.hidden = true; });
-      marker.addEventListener('click', () => jump(entry.at));
+      marker.addEventListener('click', () => {
+        if (mobile.matches) preview.hidden = true;
+        jump(entry.at);
+      });
       markerButtons.push(marker);
       markers.append(marker);
     }
@@ -203,13 +249,21 @@
 
   function buildQaLinks() {
     const links = get('qa-links');
+    const picker = get('qa-topic-select');
     for (const topic of data.qaTopics) {
       const button = element('button', 'qa-link');
       button.type = 'button';
       button.append(element('span', '', formatTime(topic.at)), document.createTextNode(topic.title));
       button.addEventListener('click', () => jump(topic.at));
       links.append(button);
+      const option = element('option', '', `${formatTime(topic.at)} · ${topic.title}`);
+      option.value = String(topic.at);
+      picker.append(option);
     }
+    picker.addEventListener('change', () => {
+      if (picker.value) jump(Number(picker.value));
+      picker.selectedIndex = 0;
+    });
   }
 
   function buildDownloads() {
@@ -229,7 +283,7 @@
   function placeMarkers() {
     const endOfLane = [-Infinity, -Infinity, -Infinity, -Infinity, -Infinity];
     const width = markers.clientWidth;
-    const gap = matchMedia('(max-width: 850px)').matches ? 8 : 12;
+    const gap = mobile.matches ? 8 : 12;
     for (const [i, entry] of data.media.entries()) {
       const x = width * entry.at / duration;
       let lane = endOfLane.findIndex((end) => x - end >= gap);
@@ -309,19 +363,22 @@
     }
   }
 
-  function render() {
-    const time = pendingSeek ?? audio.currentTime;
+  function renderTransport(time) {
     get('current-time').textContent = formatTime(time);
     seek.setAttribute('aria-valuetext', `${formatTime(time)} / ${formatTime(duration)}`);
     if (!scrubbing) seek.value = String(time);
     timeline.style.setProperty('--progress', `${Math.min(100, time / duration * 100)}%`);
+  }
 
+  function render() {
+    const time = pendingSeek ?? audio.currentTime;
+    renderTransport(scrubPosition ?? time);
     const mediaIndex = Math.max(0, selectedAt(data.media, time + .015));
     if (mediaIndex !== activeMedia) {
       setCurrent(slideButtons, activeMedia, mediaIndex);
       setCurrent(markerButtons, activeMedia, mediaIndex);
       activeMedia = mediaIndex;
-      reveal(slideList, slideButtons[activeMedia], matchMedia('(max-width: 850px)').matches);
+      reveal(slideList, slideButtons[activeMedia]);
     }
     showMedia(data.media[activeMedia], time);
 
@@ -336,6 +393,24 @@
         get('caption-title').textContent = data.cues[activeCue]?.role || '现场交流';
       }
     }
+
+    const subtitleIndex = selectedAt(subtitles, time);
+    const subtitle = subtitles[subtitleIndex];
+    const nextSubtitle = subtitle && time < subtitle.end ? subtitleIndex : -1;
+    if (activeSubtitle !== nextSubtitle) {
+      activeSubtitle = nextSubtitle;
+      subtitleLine.textContent = nextSubtitle >= 0 ? subtitle.text : '';
+    }
+  }
+
+  function finishScrub(commit) {
+    if (!scrubbing) return;
+    const position = scrubPosition;
+    scrubbing = false;
+    scrubPosition = null;
+    preview.hidden = true;
+    if (commit && position !== null) jump(position);
+    else render();
   }
 
   function togglePlay() {
@@ -359,16 +434,42 @@
   buildTranscript();
   buildQaLinks();
   buildDownloads();
+  for (const pane of mobilePanes) pane.tab.addEventListener('click', () => showMobilePanel(pane.name));
+  get('mobile-tabs').addEventListener('keydown', (event) => {
+    if (event.key === 'Home') showMobilePanel('transcript', true);
+    else if (event.key === 'End') showMobilePanel('slides', true);
+    else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      showMobilePanel(mobilePanel === 'transcript' ? 'slides' : 'transcript', true);
+    } else return;
+    event.preventDefault();
+  });
+  mobile.addEventListener('change', applyLayout);
+  applyLayout();
   new ResizeObserver(placeMarkers).observe(markers);
 
   play.addEventListener('click', togglePlay);
   get('back').addEventListener('click', () => jump((pendingSeek ?? audio.currentTime) - 15));
   get('forward').addEventListener('click', () => jump((pendingSeek ?? audio.currentTime) + 15));
   seek.addEventListener('pointerdown', () => { scrubbing = true; });
-  window.addEventListener('pointerup', () => { scrubbing = false; });
-  seek.addEventListener('pointercancel', () => { scrubbing = false; });
-  seek.addEventListener('input', () => jump(seek.valueAsNumber));
-  seek.addEventListener('change', () => { scrubbing = false; render(); });
+  window.addEventListener('pointerup', () => finishScrub(true));
+  seek.addEventListener('pointercancel', () => finishScrub(false));
+  seek.addEventListener('input', () => {
+    const time = seek.valueAsNumber;
+    if (mobile.matches && scrubbing) {
+      scrubPosition = time;
+      renderTransport(time);
+      showPreview(data.media[Math.max(0, selectedAt(data.media, time))], time);
+    } else {
+      jump(time);
+    }
+  });
+  seek.addEventListener('change', () => finishScrub(true));
+
+  subtitleToggle.addEventListener('click', () => {
+    subtitleBand.hidden = !subtitleBand.hidden;
+    subtitleToggle.setAttribute('aria-pressed', String(!subtitleBand.hidden));
+    subtitleToggle.title = subtitleBand.hidden ? '开启字幕' : '关闭字幕';
+  });
 
   for (const name of ['wheel', 'touchmove']) {
     transcriptScroll.addEventListener(name, () => setFollow(false), { passive: true });
@@ -401,15 +502,20 @@
     get('volume').value = String(audio.volume);
   });
 
-  get('stage-expand').addEventListener('click', () => {
+  stageExpand.addEventListener('click', () => {
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {});
-    } else if (visual.requestFullscreen && document.fullscreenEnabled) {
-      visual.requestFullscreen().catch(() => {});
+    } else if (stage.requestFullscreen && document.fullscreenEnabled) {
+      stage.requestFullscreen().catch(() => {});
     } else {
       const entry = data.media[activeMedia];
       if (entry.kind !== 'qa') window.open(entry.src, '_blank', 'noopener');
     }
+  });
+  document.addEventListener('fullscreenchange', () => {
+    const label = document.fullscreenElement === stage ? '退出全屏' : '全屏查看画面';
+    stageExpand.setAttribute('aria-label', label);
+    stageExpand.title = label;
   });
 
   audio.addEventListener('loadedmetadata', () => {
@@ -528,8 +634,7 @@
     workspace.style.setProperty('--masthead-height', `${masthead.offsetHeight}px`);
   }).observe(masthead);
   window.addEventListener('resize', () => {
-    const stage = get('stage');
-    if (window.innerWidth > 850 && stage.clientWidth < 338) {
+    if (!mobile.matches && stage.clientWidth < 338) {
       workspace.style.removeProperty('--left-width');
       workspace.style.removeProperty('--right-width');
     }
