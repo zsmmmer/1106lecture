@@ -73,6 +73,8 @@ async function desktop(browser, url) {
   await page.goto(url);
   await page.waitForFunction(() => document.querySelector('#main-image').naturalWidth > 0);
   await page.waitForFunction(() => document.querySelector('audio').readyState >= 1);
+  assert(await page.locator('audio').evaluate((el) =>
+    el.currentSrc.endsWith('/assets/lecture-clear.m4a') && Math.abs(el.duration - 5642.52) < .025));
   assert.equal(await page.locator('.slide-card').count(), 77);
   assert.equal(await page.locator('.marker').count(), 77);
   assert((await page.locator('.cue').count()) >= 120);
@@ -150,7 +152,7 @@ async function desktop(browser, url) {
 
   await page.locator('#download-open').click();
   assert(await page.locator('#download-dialog').isVisible());
-  assert.equal(await page.locator('#download-dialog a[download]').count(), 10);
+  assert.equal(await page.locator('#download-dialog a[download]').count(), 11);
   const files = await page.locator('#download-dialog a[download]').evaluateAll((items) => items.map((el) => el.href));
   for (const file of files) {
     const response = await page.request.head(file);
@@ -166,6 +168,64 @@ async function desktop(browser, url) {
   assert(!(await page.locator('#download-dialog').isVisible()));
   assert.deepEqual(errors, []);
   await page.close();
+}
+
+async function visualContinuity(browser, url) {
+  const page = await browser.newPage({ viewport: { width: 1200, height: 780 } });
+  const releases = [];
+  async function hold(pattern) {
+    let release;
+    const ready = new Promise((resolve) => { release = resolve; });
+    releases.push(release);
+    await page.route(pattern, async (route) => {
+      await ready;
+      await route.continue();
+    });
+    return release;
+  }
+  const still = (name) => page.waitForFunction((file) => {
+    const image = document.querySelector('#main-image');
+    return !image.hidden && image.naturalWidth > 0 && image.currentSrc.endsWith('/' + file);
+  }, name);
+  const choose = (text) => page.locator('.slide-card').filter({ hasText: text }).click();
+
+  try {
+    const releasePhoto = await hold('**/assets/slides/7616.webp');
+    const releaseStalePhoto = await hold('**/assets/slides/7615.webp');
+    const releaseVideo = await hold('**/assets/video/7623.mp4');
+    const releaseEnd = await hold('**/assets/slides/7623-end.webp');
+    await page.goto(url);
+    await still('7613.webp');
+
+    await choose('的建设初心');
+    await still('7613.webp');
+    releasePhoto();
+    await still('7616.webp');
+
+    await choose('文化遗产数字化与古塔研究');
+    await still('7616.webp');
+    await choose('中国文化遗产全景库');
+    await still('7617.webp');
+    const stale = page.waitForResponse('**/assets/slides/7615.webp');
+    releaseStalePhoto();
+    await (await stale).finished();
+    await still('7617.webp');
+
+    await choose('燕园数字孪生演示');
+    await still('7623-start.webp');
+    assert.equal(await page.locator('video').evaluate((el) => getComputedStyle(el).opacity), '0');
+    releaseVideo();
+    await page.waitForFunction(() => document.querySelector('video').hasAttribute('data-frame-ready'));
+    await page.locator('audio').evaluate((el) => { el.currentTime = 470; });
+    await page.waitForFunction(() => document.querySelector('#stage-type').textContent === '视频末帧');
+    assert(await page.locator('video').evaluate((el) => !el.hidden && el.hasAttribute('data-frame-ready') && el.paused));
+    releaseEnd();
+    await still('7623-end.webp');
+    assert(await page.locator('video').evaluate((el) => el.hidden));
+  } finally {
+    for (const release of releases) release();
+    await page.close();
+  }
 }
 
 async function mobile(browser, url, width, height, name) {
@@ -230,10 +290,11 @@ async function mobile(browser, url, width, height, name) {
   const browser = await chromium.launch();
   try {
     await desktop(browser, url);
+    await visualContinuity(browser, url);
     await mobile(browser, url, 390, 844, 'mobile');
     await mobile(browser, url, 320, 568, 'mobile-compact');
     await mobile(browser, url, 932, 430, 'mobile-landscape');
-    console.log('Playback, muted video sync, subtitles, navigation, panel resizing, downloads and mobile layouts passed.');
+    console.log('Playback, frame continuity, muted video sync, subtitles, navigation, panel resizing, downloads and mobile layouts passed.');
   } finally {
     await browser.close();
     server.close();

@@ -5,7 +5,8 @@
   const data = window.LECTURE_DATA;
   const audio = get('lecture-audio');
   const video = get('visual-video');
-  const image = get('main-image');
+  let image = get('main-image');
+  const qaView = get('qa-view');
   const stage = get('stage');
   const status = get('playback-status');
   const stageMessage = get('stage-message');
@@ -33,6 +34,8 @@
     return;
   }
   video.muted = true;
+  const nextFrame = new Image();
+  nextFrame.fetchPriority = 'low';
 
   let duration = data.duration;
   let pendingSeek = null;
@@ -43,7 +46,7 @@
   let currentClip = null;
   let follow = true;
   let audioRunning = false;
-  let videoPlayPending = false;
+  let videoPlayPending = null;
   let videoPlayDenied = false;
   let scrubbing = false;
   let scrubPosition = null;
@@ -296,7 +299,9 @@
   function releaseVideo() {
     video.pause();
     video.hidden = true;
+    video.removeAttribute('data-frame-ready');
     currentClip = null;
+    videoPlayPending = null;
     if (video.hasAttribute('src')) {
       video.removeAttribute('src');
       video.load();
@@ -304,21 +309,59 @@
   }
 
   function syncVideo() {
-    if (!currentClip || video.readyState < HTMLMediaElement.HAVE_METADATA) return;
-    const time = pendingSeek ?? audio.currentTime;
-    const target = Math.max(0, Math.min(time - currentClip.at, video.duration - 0.035));
-    if (Math.abs(video.currentTime - target) > .32) video.currentTime = target;
+    if (!currentClip || video.error) return;
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA && !video.seeking) {
+      const time = pendingSeek ?? audio.currentTime;
+      const target = Math.max(0, Math.min(time - currentClip.at, video.duration - 0.035));
+      if (Math.abs(video.currentTime - target) > .32) {
+        video.currentTime = target;
+      } else if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        video.setAttribute('data-frame-ready', '');
+        stageMessage.hidden = true;
+      }
+    }
     if (video.playbackRate !== audio.playbackRate) video.playbackRate = audio.playbackRate;
     if (!audioRunning || audio.seeking || audio.paused) {
       video.pause();
-    } else if (video.paused && !videoPlayPending && !videoPlayDenied) {
-      videoPlayPending = true;
-      video.play()
+    } else if (video.paused && !video.ended && !videoPlayPending && !videoPlayDenied) {
+      const attempt = video.play();
+      videoPlayPending = attempt;
+      attempt
         .catch((error) => {
-          if (error.name === 'NotAllowedError') videoPlayDenied = true;
+          if (videoPlayPending === attempt && error.name !== 'AbortError') videoPlayDenied = true;
         })
-        .finally(() => { videoPlayPending = false; });
+        .finally(() => {
+          if (videoPlayPending === attempt) videoPlayPending = null;
+        });
     }
+  }
+
+  async function showStill(entry, source, key) {
+    const frame = new Image();
+    frame.src = source;
+    try {
+      await frame.decode();
+    } catch {
+      if (key !== visualKey) return false;
+      frame.src = entry.thumb;
+      try {
+        await frame.decode();
+      } catch {
+        if (key === visualKey && image.hidden && !video.hasAttribute('data-frame-ready')) {
+          stageMessage.textContent = '画面暂未载入';
+          stageMessage.hidden = false;
+        }
+        return false;
+      }
+    }
+    if (key !== visualKey) return false;
+    // Swap only after decoding so the last visible frame covers the load.
+    frame.id = image.id;
+    frame.alt = entry.title;
+    image.replaceWith(frame);
+    image = frame;
+    stageMessage.hidden = true;
+    return true;
   }
 
   function showMedia(entry, time) {
@@ -330,8 +373,7 @@
     }
     visualKey = key;
     const isQa = entry.kind === 'qa';
-    get('qa-view').hidden = !isQa;
-    stageMessage.hidden = true;
+    qaView.hidden = !isQa;
     const currentDownload = get('current-download');
     currentDownload.hidden = isQa;
     if (!isQa) {
@@ -343,24 +385,40 @@
     get('caption-chapter').textContent = entry.chapter;
     get('caption-title').textContent = isQa ? '现场交流' : entry.title;
     get('caption-note').textContent = entry.note || '';
+    if (isQa) {
+      releaseVideo();
+      image.hidden = true;
+      stageMessage.hidden = true;
+      return;
+    }
+
+    image.hidden = !image.naturalWidth;
+    stageMessage.textContent = '正在载入讲座画面';
+    stageMessage.hidden = !image.hidden || video.hasAttribute('data-frame-ready');
     if (liveClip) {
       releaseVideo();
+      stageMessage.hidden = !image.hidden;
       currentClip = entry;
       videoPlayDenied = false;
-      image.hidden = true;
+      showStill(entry, entry.poster, key);
       video.hidden = false;
-      video.poster = entry.poster;
       video.src = entry.src;
       video.preload = 'auto';
       video.load();
+      syncVideo();
+      nextFrame.src = entry.last;
       return;
     }
-    releaseVideo();
-    image.hidden = isQa;
-    if (!isQa) {
-      image.src = entry.kind === 'video' ? entry.last : entry.src;
-      image.alt = entry.title;
-    }
+
+    // Hold the last video frame too, including at the end of a clip.
+    currentClip = null;
+    video.pause();
+    showStill(entry, entry.kind === 'video' ? entry.last : entry.src, key).then((shown) => {
+      if (shown && key === visualKey) releaseVideo();
+    });
+    const following = data.media[activeMedia + 1];
+    const upcoming = following?.poster ?? following?.src;
+    if (upcoming) nextFrame.src = upcoming;
   }
 
   function renderTransport(time) {
@@ -549,16 +607,15 @@
   }
   for (const event of ['timeupdate', 'seeking', 'seeked']) audio.addEventListener(event, render);
   audio.addEventListener('error', () => { status.textContent = '录音载入失败，可在下载面板获取文件。'; });
-  video.addEventListener('loadedmetadata', syncVideo);
-  video.addEventListener('canplay', syncVideo);
+  for (const event of ['loadedmetadata', 'loadeddata', 'canplay', 'seeked']) video.addEventListener(event, syncVideo);
   video.addEventListener('error', () => {
-    if (!currentClip) return;
-    image.src = currentClip.poster;
-    image.alt = currentClip.title;
-    image.hidden = false;
+    if (!currentClip || !video.error) return;
+    video.removeAttribute('data-frame-ready');
     video.hidden = true;
-    stageMessage.textContent = '视频载入失败，继续播放主录音';
-    stageMessage.hidden = false;
+    if (image.hidden) {
+      stageMessage.textContent = '视频载入失败，继续播放主录音';
+      stageMessage.hidden = false;
+    }
   });
 
   document.addEventListener('keydown', (event) => {

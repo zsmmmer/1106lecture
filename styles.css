@@ -419,6 +419,8 @@ svg { display: block; }
   inset: 0;
   filter: drop-shadow(0 8px 22px #0c120e66);
 }
+.visual > video { background: var(--stage-deep); }
+.visual > video:not([data-frame-ready]) { opacity: 0; }
 .stage:fullscreen { width: 100%; height: 100%; }
 .stage:fullscreen .visual { flex: 1 1 0; max-height: none; aspect-ratio: auto; }
 .stage:fullscreen .visual > img, .stage:fullscreen .visual > video { filter: none; }
